@@ -1,0 +1,49 @@
+version: '3'
+
+dotenv: ['.env']
+
+vars:
+  DB_DRIVER: '{{.DB_DRIVER | default "postgres"}}'
+  DB_DIR: '{{.DB_DIR | default "internal/database/schema"}}'
+  DATABASE_URL: '{{.DATABASE_URL | default "postgres://postgres:postgres@localhost:5432/voiceflow_guard?sslmode=disable"}}'
+
+tasks:
+  default:
+    desc: List available tasks
+    silent: true
+    cmds:
+      - task --list
+
+  dev:
+    desc: Run server locally
+    cmds:
+      - go run ./cmd/server
+
+  sqlc:
+    desc: Generate Go database code from SQL schema and queries
+    cmds:
+      - sqlc generate
+
+  'migrate:create':
+    desc: 'Create a new migration (e.g. task migrate:create -- add_users_table)'
+    vars:
+      NAME: '{{.NAME | default .CLI_ARGS}}'
+    cmds:
+      - cmd: '{{if not .NAME}}echo "Error: Migration name required. Usage: task migrate:create -- <migration_name>" && exit 1{{end}}'
+        silent: true
+      - goose -dir {{.DB_DIR}} create {{.NAME}} sql
+
+  'migrate:up':
+    desc: Apply pending migrations
+    cmds:
+      - goose -dir {{.DB_DIR}} {{.DB_DRIVER}} "{{.DATABASE_URL}}" up
+
+  'migrate:down':
+    desc: Roll back the last migration
+    cmds:
+      - goose -dir {{.DB_DIR}} {{.DB_DRIVER}} "{{.DATABASE_URL}}" down
+
+  'migrate:status':
+    desc: View migration status
+    cmds:
+      - goose -dir {{.DB_DIR}} {{.DB_DRIVER}} "{{.DATABASE_URL}}" status

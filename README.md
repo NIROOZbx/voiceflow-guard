@@ -5,21 +5,42 @@ A Go HTTP API built with Gin, PostgreSQL connectivity through pgx, and sqlc for 
 ## Run
 
 ```sh
-go mod tidy
+task dev
+# or
 go run ./cmd/server
 ```
 
-The server listens on `0.0.0.0:8080` by default. Configure it with:
+The server listens on `0.0.0.0:8080` by default. Configure it with a `.env` file (see `.env.example`):
 
 - `HOST` (default `0.0.0.0`)
 - `PORT` (default `8080`)
-- `DATABASE_URL` (optional PostgreSQL connection URL; when set, the server verifies the connection at startup)
+- `DATABASE_URL` (PostgreSQL connection URL; when set, the server verifies the connection at startup)
 
-## Database queries
+## Database Migrations (Goose)
 
-Place schema migrations or schema definitions in `internal/database/schema` and SQL query files in `internal/database/queries`. Generate the Go query layer with:
+Migrations are located in `internal/database/schema` and managed via [Goose](https://github.com/pressly/goose).
 
 ```sh
+# Create a new SQL migration file
+task migrate:create -- add_users_table
+
+# Check migration status
+task migrate:status
+
+# Run all pending migrations
+task migrate:up
+
+# Roll back the most recent migration
+task migrate:down
+```
+
+## Database queries (sqlc)
+
+Place schema migrations in `internal/database/schema` and SQL query files in `internal/database/queries`. Generate the Go query layer with:
+
+```sh
+task sqlc
+# or
 sqlc generate
 ```
 
@@ -36,3 +57,4 @@ Expected response:
 ```json
 {"status":"ok"}
 ```
+
