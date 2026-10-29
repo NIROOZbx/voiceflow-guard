@@ -1,0 +1,82 @@
+package server
+
+import (
+	"context"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/NIROOZbx/voiceflow-guard/internal/service"
+	"github.com/NIROOZbx/voiceflow-guard/pkg/apperror"
+	"github.com/gin-gonic/gin"
+)
+
+type BookingService interface {
+	CreateBooking(ctx context.Context, input service.CreateBookingInput) (*service.CreateBookingResult, error)
+}
+
+type BookingHandler struct {
+	bookingService BookingService
+}
+
+func NewBookingHandler(bookingService BookingService) *BookingHandler {
+	return &BookingHandler{
+		bookingService: bookingService,
+	}
+}
+
+type CreateBookingRequest struct {
+	CustomerName   string `json:"customer_name" binding:"required"`
+	PartySize      int    `json:"party_size" binding:"required,gt=0"`
+	BookingDate    string `json:"booking_date" binding:"required"`
+	BookingTime    string `json:"booking_time" binding:"required"`
+}
+
+func (h *BookingHandler) CreateBooking(c *gin.Context) {
+	var req CreateBookingRequest
+
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 1. Resolve Idempotency Key (Header can override if provided)
+	var idempotencyKey string
+	if headerKey := strings.TrimSpace(c.GetHeader("Idempotency-Key")); headerKey != "" {
+		idempotencyKey = headerKey
+	}
+
+
+	// 2. Parse Date (format: YYYY-MM-DD)
+	bookingDate, err := time.Parse("2006-01-02", req.BookingDate)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid booking_date format, expected YYYY-MM-DD"})
+		return
+	}
+
+	// 3. Parse Time (supports HH:MM or HH:MM:SS)
+	bookingTime, err := time.Parse("15:04:05", req.BookingTime)
+	if err != nil {
+		bookingTime, err = time.Parse("15:04", req.BookingTime)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid booking_time format, expected HH:MM or HH:MM:SS"})
+			return
+		}
+	}
+
+	// 4. Delegate to Service
+	result, err := h.bookingService.CreateBooking(c.Request.Context(), service.CreateBookingInput{
+		IdempotencyKey: idempotencyKey,
+		CustomerName:   req.CustomerName,
+		PartySize:      req.PartySize,
+		BookingDate:    bookingDate,
+		BookingTime:    bookingTime,
+	})
+	if err != nil {
+		c.JSON(apperror.HTTPStatus(err), gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, result)
+}

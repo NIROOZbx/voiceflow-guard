@@ -8,7 +8,10 @@ import (
 
 	"github.com/NIROOZbx/voiceflow-guard/internal/config"
 	"github.com/NIROOZbx/voiceflow-guard/internal/database"
+	"github.com/NIROOZbx/voiceflow-guard/internal/database/sqlc"
+	"github.com/NIROOZbx/voiceflow-guard/internal/repository"
 	"github.com/NIROOZbx/voiceflow-guard/internal/server"
+	"github.com/NIROOZbx/voiceflow-guard/internal/service"
 )
 
 func main() {
@@ -25,10 +28,20 @@ func main() {
 
 	db, err := database.Connect(context.Background(),cfg.DatabaseURL)
 		if err != nil {
+			
+			
 			log.Fatalf("connect to database: %v", err)
 		}
 
-	router := server.NewRouter()
+		queries:=sqlc.New(db)
+
+		operationRepo := repository.NewOpsRepo(queries)
+		bookingRepo := repository.NewBookingsRepo(queries)
+		opsService := service.NewOpsService(operationRepo, bookingRepo)
+		bookingHandler := server.NewBookingHandler(opsService)
+
+	router := server.NewRouter(bookingHandler)
+
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddress(),
 		Handler:           router,
