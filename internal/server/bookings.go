@@ -26,27 +26,30 @@ func NewBookingHandler(bookingService BookingService) *BookingHandler {
 }
 
 type CreateBookingRequest struct {
-	CustomerName   string `json:"customer_name" binding:"required"`
-	PartySize      int    `json:"party_size" binding:"required,gt=0"`
-	BookingDate    string `json:"booking_date" binding:"required"`
-	BookingTime    string `json:"booking_time" binding:"required"`
+	CustomerName string `json:"customer_name" binding:"required"`
+	PartySize    int    `json:"party_size" binding:"required,gt=0"`
+	BookingDate  string `json:"booking_date" binding:"required"`
+	BookingTime  string `json:"booking_time" binding:"required"`
 }
 
 func (h *BookingHandler) CreateBooking(c *gin.Context) {
 	var req CreateBookingRequest
-
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 1. Resolve Idempotency Key (Header can override if provided)
-	var idempotencyKey string
-	if headerKey := strings.TrimSpace(c.GetHeader("Idempotency-Key")); headerKey != "" {
-		idempotencyKey = headerKey
-	}
+	idempotencyKey := strings.TrimSpace(
+		c.GetHeader("Idempotency-Key"),
+	)
 
+	if idempotencyKey == "" || len(idempotencyKey) > 255 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Idempotency-Key header is required and must not exceed 255 characters",
+		})
+		return
+	}
 
 	// 2. Parse Date (format: YYYY-MM-DD)
 	bookingDate, err := time.Parse("2006-01-02", req.BookingDate)
