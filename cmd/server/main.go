@@ -20,15 +20,12 @@ func main() {
 		log.Fatalf("load configuration: %v", err)
 	}
 
-	if cfg.DatabaseURL == "" {
-		log.Println("DATABASE_URL is empty; starting without a database connection")
-	}
-
+	log.Println("connecting to database...")
 	db, err := database.Connect(context.Background(), cfg.DatabaseURL)
 	if err != nil {
-
 		log.Fatalf("connect to database: %v", err)
 	}
+	log.Println("database connection established successfully")
 
 	queries := sqlc.New(db)
 

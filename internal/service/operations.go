@@ -13,6 +13,7 @@ import (
 	"github.com/NIROOZbx/voiceflow-guard/pkg/apperror"
 	"github.com/NIROOZbx/voiceflow-guard/pkg/hasher"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type BookingService struct {
@@ -72,7 +73,7 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 
 	requestHash, err := hasher.JSON(payload)
 	if err != nil {
-		return nil, fmt.Errorf("hash booking request: %w", err)
+		return nil, apperror.ErrOperationFailed
 	}
 
 	existingOperation, err := s.operationsRepo.GetOperationByIdempotencyKey(ctx, key)
@@ -83,7 +84,7 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 
 		return s.handleExistingOperation(existingOperation)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, fmt.Errorf("check existing operation: %w", err)
+		return nil, apperror.ErrOperationFailed
 	}
 
 	var result *CreateBookingResult
@@ -129,7 +130,27 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 	})
 
 	if err != nil {
-		return nil, err
+		if isIdempotencyKeyConflict(err) {
+			// Use the normal repository, NOT the failed transaction.
+			existing, lookupErr := s.operationsRepo.GetOperationByIdempotencyKey(
+				ctx,
+				key,
+			)
+			if lookupErr != nil {
+				return nil, lookupErr
+			}
+
+			// Check whether this is actually the same request.
+			if !existing.RequestHash.Valid ||
+				existing.RequestHash.String != requestHash {
+				return nil, apperror.ErrIdempotencyConflict
+			}
+
+			// Same request: return the original result.
+			return s.handleExistingOperation(existing)
+		}
+
+		return nil, apperror.ErrOperationFailed
 	}
 
 	return result, nil
@@ -148,7 +169,7 @@ func (s *BookingService) handleExistingOperation(existingOperation sqlc.Operatio
 		return nil, apperror.ErrOperationFailed
 
 	default:
-		return nil, fmt.Errorf("unknown operation status %q", existingOperation.Status)
+		return nil, apperror.ErrOperationFailed
 	}
 }
 
@@ -168,8 +189,16 @@ func decodeOperationResult(operation sqlc.Operation) (*CreateBookingResult, erro
 	var result CreateBookingResult
 
 	if err := json.Unmarshal(operation.Result, &result); err != nil {
-		return nil, fmt.Errorf("decode operation result: %w", err)
+		return nil, apperror.ErrOperationFailed
 	}
 
 	return &result, nil
+}
+
+func isIdempotencyKeyConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return pgErr.ConstraintName == "" || strings.Contains(pgErr.ConstraintName, "idempotency_key")
+	}
+	return false
 }

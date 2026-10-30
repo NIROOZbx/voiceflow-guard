@@ -6,6 +6,8 @@ vars:
   DB_DRIVER: '{{.DB_DRIVER | default "postgres"}}'
   DB_DIR: '{{.DB_DIR | default "internal/database/schema"}}'
   DATABASE_URL: '{{.DATABASE_URL | default "postgres://postgres:postgres@localhost:5432/voiceflow_guard?sslmode=disable"}}'
+  TEST_DATABASE_URL: '{{.TEST_DATABASE_URL | default "postgres://postgres:postgres@localhost:5434/voiceflow_guard_test?sslmode=disable"}}'
+  TEST_COMPOSE_FILE: 'docker-compose.test.yml'
 
 tasks:
   default:
@@ -47,3 +49,38 @@ tasks:
     desc: View migration status
     cmds:
       - goose -dir {{.DB_DIR}} {{.DB_DRIVER}} "{{.DATABASE_URL}}" status
+
+  test:
+    desc: Run integration tests with isolated test database (spins up container, runs tests, cleans up)
+    cmds:
+      - task: 'test:db:up'
+      - defer: { task: 'test:db:down' }
+      - task: 'test:integration'
+
+  'test:db:up':
+    desc: Start isolated test database container and wait for health
+    cmds:
+      - docker compose -f {{.TEST_COMPOSE_FILE}} up -d --wait
+
+  'test:db:down':
+    desc: Stop and remove isolated test database container
+    cmds:
+      - docker compose -f {{.TEST_COMPOSE_FILE}} down -v --remove-orphans
+
+  'test:integration':
+    desc: Run integration tests against running test database
+    env:
+      TEST_DATABASE_URL: '{{.TEST_DATABASE_URL}}'
+    cmds:
+      - go test -v -count=1 -tags=integration ./tests/integration/...
+
+  'test:unit':
+    desc: Run unit tests only
+    cmds:
+      - go test -v ./...
+
+  'test:all':
+    desc: Run both unit and integration tests
+    cmds:
+      - task: test:unit
+      - task: test

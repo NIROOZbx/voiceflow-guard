@@ -77,7 +77,12 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		BookingTime:    bookingTime,
 	})
 	if err != nil {
-		c.JSON(apperror.HTTPStatus(err), gin.H{"error": err.Error()})
+		status := apperror.HTTPStatus(err)
+		if status == http.StatusInternalServerError {
+			c.JSON(status, gin.H{"error": "operation failed"})
+			return
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 

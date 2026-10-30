@@ -39,6 +39,8 @@ func runHTTPServer(httpServer *http.Server,db *pgxpool.Pool) error {
 	if err := httpServer.Shutdown(ctx); err != nil {
 		return err
 	}
+	log.Println("closing database connection pool...")
 	db.Close()
+	log.Println("database connection pool closed")
 	return nil
 }

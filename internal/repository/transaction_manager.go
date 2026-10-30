@@ -12,8 +12,8 @@ type Transaction struct {
 }
 
 type Repositories struct {
-	Operations *OperationsRepo
-	Bookings   *BookingsRepo
+	Operations OperationsRepository
+	Bookings   BookingsRepository
 }
 
 type TransactionManager interface {
