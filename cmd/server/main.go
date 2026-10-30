@@ -20,25 +20,24 @@ func main() {
 		log.Fatalf("load configuration: %v", err)
 	}
 
-	
-
 	if cfg.DatabaseURL == "" {
 		log.Println("DATABASE_URL is empty; starting without a database connection")
 	}
 
-	db, err := database.Connect(context.Background(),cfg.DatabaseURL)
-		if err != nil {
-			
-			
-			log.Fatalf("connect to database: %v", err)
-		}
+	db, err := database.Connect(context.Background(), cfg.DatabaseURL)
+	if err != nil {
 
-		queries:=sqlc.New(db)
+		log.Fatalf("connect to database: %v", err)
+	}
 
-		operationRepo := repository.NewOpsRepo(queries)
-		bookingRepo := repository.NewBookingsRepo(queries)
-		opsService := service.NewOpsService(operationRepo, bookingRepo)
-		bookingHandler := server.NewBookingHandler(opsService)
+	queries := sqlc.New(db)
+
+	operationRepo := repository.NewOpsRepo(queries)
+	repository.NewBookingsRepo(queries)
+
+	txManager := repository.NewTransactionManager(db)
+	opsService := service.NewOpsService(operationRepo,txManager)
+	bookingHandler := server.NewBookingHandler(opsService)
 
 	router := server.NewRouter(bookingHandler)
 
@@ -48,7 +47,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	if err := runHTTPServer(httpServer,db); err != nil {
+	if err := runHTTPServer(httpServer, db); err != nil {
 		log.Fatalf("HTTP server: %v", err)
 	}
 }

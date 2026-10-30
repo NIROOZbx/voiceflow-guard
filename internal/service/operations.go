@@ -15,9 +15,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type BookingService	 struct {
-	operationsRepo     repository.OperationsRepository
-	bookingsRepo repository.BookingsRepository
+type BookingService struct {
+	operationsRepo repository.OperationsRepository
+	TxManager      repository.TransactionManager
 }
 type CreateBookingInput struct {
 	IdempotencyKey string
@@ -44,10 +44,11 @@ type CreateBookingResult struct {
 	PartySize    int    `json:"party_size"`
 }
 
-func NewOpsService(opsRepo repository.OperationsRepository, bookingRepo repository.BookingsRepository) *BookingService {
+func NewOpsService(opsRepo repository.OperationsRepository,txManager repository.TransactionManager) *BookingService {
 	return &BookingService{
-		operationsRepo:     opsRepo,
-		bookingsRepo: bookingRepo,
+		operationsRepo: opsRepo,
+		
+		TxManager:      txManager,
 	}
 }
 
@@ -85,34 +86,50 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 		return nil, fmt.Errorf("check existing operation: %w", err)
 	}
 
-	operation, err := s.operationsRepo.CreateOperation(ctx, key, requestHash)
-	if err != nil {
-		return nil, fmt.Errorf("create operation: %w", err)
-	}
+	var result *CreateBookingResult
 
-	booking, err := s.bookingsRepo.CreateBooking(ctx, repository.CreateBookingParams{
-		OperationID:  operation.ID,
-		CustomerName: input.CustomerName,
-		BookingDate:  toPGDate(input.BookingDate),
-		BookingTime:  toPGTime(input.BookingTime),
-		PartySize:    int32(input.PartySize),
+	err = s.TxManager.WithinTransaction(ctx, func(r *repository.Repositories) error {
+
+		// Create operation
+		operation, err := r.Operations.CreateOperation(ctx, key, requestHash)
+		if err != nil {
+			return fmt.Errorf("create operation: %w", err)
+		}
+
+		// Create booking
+
+		booking, err := r.Bookings.CreateBooking(ctx, repository.CreateBookingParams{
+			OperationID:  operation.ID,
+			CustomerName: customerName,
+			BookingDate:  toPGDate(input.BookingDate),
+			BookingTime:  toPGTime(input.BookingTime),
+			PartySize:    int32(input.PartySize),
+		})
+
+		if err != nil {
+			return fmt.Errorf("create booking: %w", err)
+		}
+
+		// Build result
+		result = mapBookingToResult(operation, booking)
+
+		// Serialize result
+		bytes, err := json.Marshal(result)
+
+		if err != nil {
+			return fmt.Errorf("marshal booking result: %w", err)
+		}
+		// Mark operation completed
+		_, err = r.Operations.UpdateOperationStatus(ctx, operation.ID, result.Status, bytes)
+
+		if err != nil {
+			return fmt.Errorf("save completed operation: %w", err)
+		}
+		return nil
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("create booking: %w", err)
-	}
-	result := mapBookingToResult(operation, booking)
-
-	bytes, err := json.Marshal(result)
-
-	if err != nil {
-		return nil, fmt.Errorf("marshal booking result: %w", err)
-	}
-
-	_, err = s.operationsRepo.UpdateOperationStatus(ctx, operation.ID, result.Status, bytes)
-
-	if err != nil {
-		return nil, fmt.Errorf("save completed operation: %w", err)
+		return nil, err
 	}
 
 	return result, nil
@@ -146,7 +163,6 @@ func mapBookingToResult(operation sqlc.Operation, booking sqlc.Booking) *CreateB
 		PartySize:    int(booking.PartySize),
 	}
 }
-
 
 func decodeOperationResult(operation sqlc.Operation) (*CreateBookingResult, error) {
 	var result CreateBookingResult
