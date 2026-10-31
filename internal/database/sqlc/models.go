@@ -16,6 +16,7 @@ type Booking struct {
 	BookingTime  pgtype.Time
 	PartySize    int32
 	CreatedAt    pgtype.Timestamptz
+	PhoneNo      string
 }
 
 type Operation struct {

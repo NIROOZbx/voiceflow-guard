@@ -185,7 +185,8 @@ func newTestAppWithTxManager(t *testing.T, txManager repository.TransactionManag
 
 	queries := sqlc.New(globalDBPool)
 	opsRepo := repository.NewOpsRepo(queries)
-	opsService := service.NewOpsService(opsRepo, txManager)
+	bookingsRepo := repository.NewBookingsRepo(queries)
+	opsService := service.NewOpsService(opsRepo, txManager, bookingsRepo)
 	bookingHandler := server.NewBookingHandler(opsService)
 	router := server.NewRouter(bookingHandler)
 

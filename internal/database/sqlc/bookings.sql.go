@@ -15,6 +15,7 @@ const createBooking = `-- name: CreateBooking :one
 INSERT INTO bookings (
     operation_id,
     customer_name,
+    phone_no,
     booking_date,
     booking_time,
     party_size
@@ -23,14 +24,16 @@ INSERT INTO bookings (
     $2,
     $3,
     $4,
-    $5
+    $5,
+    $6
 )
-RETURNING id, operation_id, customer_name, booking_date, booking_time, party_size, created_at
+RETURNING id, operation_id, customer_name, booking_date, booking_time, party_size, created_at, phone_no
 `
 
 type CreateBookingParams struct {
 	OperationID  pgtype.UUID
 	CustomerName string
+	PhoneNo      string
 	BookingDate  pgtype.Date
 	BookingTime  pgtype.Time
 	PartySize    int32
@@ -40,6 +43,7 @@ func (q *Queries) CreateBooking(ctx context.Context, arg CreateBookingParams) (B
 	row := q.db.QueryRow(ctx, createBooking,
 		arg.OperationID,
 		arg.CustomerName,
+		arg.PhoneNo,
 		arg.BookingDate,
 		arg.BookingTime,
 		arg.PartySize,
@@ -53,12 +57,13 @@ func (q *Queries) CreateBooking(ctx context.Context, arg CreateBookingParams) (B
 		&i.BookingTime,
 		&i.PartySize,
 		&i.CreatedAt,
+		&i.PhoneNo,
 	)
 	return i, err
 }
 
 const getBookingByOperationID = `-- name: GetBookingByOperationID :one
-SELECT id, operation_id, customer_name, booking_date, booking_time, party_size, created_at FROM bookings
+SELECT id, operation_id, customer_name, booking_date, booking_time, party_size, created_at, phone_no FROM bookings
 WHERE operation_id = $1
 `
 
@@ -73,6 +78,85 @@ func (q *Queries) GetBookingByOperationID(ctx context.Context, operationID pgtyp
 		&i.BookingTime,
 		&i.PartySize,
 		&i.CreatedAt,
+		&i.PhoneNo,
 	)
 	return i, err
+}
+
+const listBookingsByPhone = `-- name: ListBookingsByPhone :many
+SELECT id, operation_id, customer_name, booking_date, booking_time, party_size, created_at, phone_no
+FROM bookings
+WHERE phone_no = $1
+ORDER BY booking_date ASC, booking_time ASC
+`
+
+func (q *Queries) ListBookingsByPhone(ctx context.Context, phoneNo string) ([]Booking, error) {
+	rows, err := q.db.Query(ctx, listBookingsByPhone, phoneNo)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Booking
+	for rows.Next() {
+		var i Booking
+		if err := rows.Scan(
+			&i.ID,
+			&i.OperationID,
+			&i.CustomerName,
+			&i.BookingDate,
+			&i.BookingTime,
+			&i.PartySize,
+			&i.CreatedAt,
+			&i.PhoneNo,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBookingsByPhoneAndDate = `-- name: ListBookingsByPhoneAndDate :many
+SELECT id, operation_id, customer_name, booking_date, booking_time, party_size, created_at, phone_no
+FROM bookings
+WHERE phone_no = $1
+  AND booking_date = $2
+ORDER BY booking_time ASC
+`
+
+type ListBookingsByPhoneAndDateParams struct {
+	PhoneNo     string
+	BookingDate pgtype.Date
+}
+
+func (q *Queries) ListBookingsByPhoneAndDate(ctx context.Context, arg ListBookingsByPhoneAndDateParams) ([]Booking, error) {
+	rows, err := q.db.Query(ctx, listBookingsByPhoneAndDate, arg.PhoneNo, arg.BookingDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Booking
+	for rows.Next() {
+		var i Booking
+		if err := rows.Scan(
+			&i.ID,
+			&i.OperationID,
+			&i.CustomerName,
+			&i.BookingDate,
+			&i.BookingTime,
+			&i.PartySize,
+			&i.CreatedAt,
+			&i.PhoneNo,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

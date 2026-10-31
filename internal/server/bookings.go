@@ -13,6 +13,7 @@ import (
 
 type BookingService interface {
 	CreateBooking(ctx context.Context, input service.CreateBookingInput) (*service.CreateBookingResult, error)
+	ListBooking(ctx context.Context, phoneNumber string, bookingDate *time.Time) ([]service.CreateBookingResult, error)
 }
 
 type BookingHandler struct {
@@ -30,6 +31,7 @@ type CreateBookingRequest struct {
 	PartySize    int    `json:"party_size" binding:"required,gt=0"`
 	BookingDate  string `json:"booking_date" binding:"required"`
 	BookingTime  string `json:"booking_time" binding:"required"`
+	PhoneNumber string `json:"phone_no" binding:"required"`
 }
 
 func (h *BookingHandler) CreateBooking(c *gin.Context) {
@@ -75,6 +77,8 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		PartySize:      req.PartySize,
 		BookingDate:    bookingDate,
 		BookingTime:    bookingTime,
+		PhoneNumber: req.PhoneNumber,
+
 	})
 	if err != nil {
 		status := apperror.HTTPStatus(err)
@@ -87,4 +91,35 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, result)
+}
+
+func (h *BookingHandler) GetBooking(c *gin.Context) {
+	phoneNumber := strings.TrimSpace(c.Query("phone_no"))
+	if phoneNumber == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "phone_no query parameter is required"})
+		return
+	}
+
+	var parsedDate *time.Time
+	if bookingDate := strings.TrimSpace(c.Query("date")); bookingDate != "" {
+		date, err := time.Parse("2006-01-02", bookingDate)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid booking_date format, expected YYYY-MM-DD"})
+			return
+		}
+		parsedDate = &date
+	}
+
+	bookings, err := h.bookingService.ListBooking(c.Request.Context(), phoneNumber, parsedDate)
+	if err != nil {
+		status := apperror.HTTPStatus(err)
+		if status == http.StatusInternalServerError {
+			c.JSON(status, gin.H{"error": "operation failed"})
+			return
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, bookings)
 }

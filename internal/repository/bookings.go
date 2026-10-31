@@ -14,6 +14,7 @@ type BookingsRepo struct {
 type CreateBookingParams struct {
 	OperationID  pgtype.UUID
 	CustomerName string
+	PhoneNo      string
 	BookingDate  pgtype.Date
 	BookingTime  pgtype.Time
 	PartySize    int32
@@ -22,6 +23,7 @@ type CreateBookingParams struct {
 type BookingsRepository interface {
 	CreateBooking(ctx context.Context, params CreateBookingParams) (sqlc.Booking, error)
 	GetBookingByOperationID(ctx context.Context, operationID pgtype.UUID) (sqlc.Booking, error)
+	ListBooking(ctx context.Context, phoneNumber string, bookingDate pgtype.Date) ([]sqlc.Booking, error)
 }
 
 func NewBookingsRepo(db *sqlc.Queries) *BookingsRepo {
@@ -34,6 +36,7 @@ func (b *BookingsRepo) CreateBooking(ctx context.Context,params CreateBookingPar
 	booking, err := b.db.CreateBooking(ctx, sqlc.CreateBookingParams{
 		OperationID:  params.OperationID,
 		CustomerName: params.CustomerName,
+		PhoneNo:      params.PhoneNo,
 		BookingDate:  params.BookingDate,
 		BookingTime:  params.BookingTime,
 		PartySize:    params.PartySize,
@@ -52,4 +55,15 @@ func (b *BookingsRepo) GetBookingByOperationID(ctx context.Context,operationID p
 	}
 
 	return booking, nil
+}
+
+func (b *BookingsRepo) ListBooking(ctx context.Context, phoneNumber string, bookingDate pgtype.Date) ([]sqlc.Booking, error) {
+	if bookingDate.Valid {
+		return b.db.ListBookingsByPhoneAndDate(ctx, sqlc.ListBookingsByPhoneAndDateParams{
+			PhoneNo:     phoneNumber,
+			BookingDate: bookingDate,
+		})
+	}
+
+	return b.db.ListBookingsByPhone(ctx, phoneNumber)
 }

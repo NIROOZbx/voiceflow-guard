@@ -8,6 +8,7 @@ import (
 var (
 	ErrMissingIdempotencyKey = errors.New("idempotency key is required")
 	ErrInvalidBooking        = errors.New("invalid booking details")
+	ErrInvalidInput          = errors.New("invalid input")
 	ErrIdempotencyConflict   = errors.New("idempotency key reused with different request")
 	ErrOperationInProgress   = errors.New("operation is still in progress")
 	ErrOperationFailed       = errors.New("operation failed")
@@ -19,6 +20,8 @@ func HTTPStatus(err error) int {
 	case errors.Is(err, ErrMissingIdempotencyKey):
 		return http.StatusBadRequest // 400
 	case errors.Is(err, ErrInvalidBooking):
+		return http.StatusBadRequest // 400
+	case errors.Is(err, ErrInvalidInput):
 		return http.StatusBadRequest // 400
 	case errors.Is(err, ErrIdempotencyConflict):
 		return http.StatusConflict // 409

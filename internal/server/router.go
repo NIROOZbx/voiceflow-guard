@@ -11,6 +11,7 @@ func NewRouter(bookingHandler *BookingHandler) *gin.Engine {
 
 	if bookingHandler != nil {
 		router.POST("/bookings", bookingHandler.CreateBooking)
+		router.GET("/bookings", bookingHandler.GetBooking)
 	}
 
 	return router

@@ -14,11 +14,13 @@ import (
 	"github.com/NIROOZbx/voiceflow-guard/pkg/hasher"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type BookingService struct {
 	operationsRepo repository.OperationsRepository
 	TxManager      repository.TransactionManager
+	bookingsRepo   repository.BookingsRepository
 }
 type CreateBookingInput struct {
 	IdempotencyKey string
@@ -26,6 +28,7 @@ type CreateBookingInput struct {
 	PartySize      int
 	BookingDate    time.Time
 	BookingTime    time.Time
+	PhoneNumber    string
 }
 
 type BookingHashPayload struct {
@@ -33,6 +36,7 @@ type BookingHashPayload struct {
 	BookingDate  string `json:"booking_date"`
 	BookingTime  string `json:"booking_time"`
 	PartySize    int    `json:"party_size"`
+	PhoneNo      string `json:"phone_no"`
 }
 
 type CreateBookingResult struct {
@@ -43,12 +47,13 @@ type CreateBookingResult struct {
 	BookingDate  string `json:"booking_date"`
 	BookingTime  string `json:"booking_time"`
 	PartySize    int    `json:"party_size"`
+	PhoneNumber  string `json:"phone_no"`
 }
 
-func NewOpsService(opsRepo repository.OperationsRepository,txManager repository.TransactionManager) *BookingService {
+func NewOpsService(opsRepo repository.OperationsRepository, txManager repository.TransactionManager, bookingsRepo repository.BookingsRepository) *BookingService {
 	return &BookingService{
 		operationsRepo: opsRepo,
-		
+		bookingsRepo:   bookingsRepo,
 		TxManager:      txManager,
 	}
 }
@@ -69,6 +74,7 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 		BookingDate:  input.BookingDate.Format("2006-01-02"),
 		BookingTime:  input.BookingTime.Format("15:04:05"),
 		PartySize:    input.PartySize,
+		PhoneNo:      input.PhoneNumber,
 	}
 
 	requestHash, err := hasher.JSON(payload)
@@ -87,7 +93,7 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 		return nil, apperror.ErrOperationFailed
 	}
 
-	var result *CreateBookingResult
+	var result CreateBookingResult
 
 	err = s.TxManager.WithinTransaction(ctx, func(r *repository.Repositories) error {
 
@@ -102,6 +108,7 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 		booking, err := r.Bookings.CreateBooking(ctx, repository.CreateBookingParams{
 			OperationID:  operation.ID,
 			CustomerName: customerName,
+			PhoneNo:      input.PhoneNumber,
 			BookingDate:  toPGDate(input.BookingDate),
 			BookingTime:  toPGTime(input.BookingTime),
 			PartySize:    int32(input.PartySize),
@@ -112,8 +119,8 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 		}
 
 		// Build result
-		result = mapBookingToResult(operation, booking)
-
+		result = mapBookingToResult(booking)
+	
 		// Serialize result
 		bytes, err := json.Marshal(result)
 
@@ -153,7 +160,7 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 		return nil, apperror.ErrOperationFailed
 	}
 
-	return result, nil
+	return &result, nil
 
 }
 
@@ -173,12 +180,13 @@ func (s *BookingService) handleExistingOperation(existingOperation sqlc.Operatio
 	}
 }
 
-func mapBookingToResult(operation sqlc.Operation, booking sqlc.Booking) *CreateBookingResult {
-	return &CreateBookingResult{
-		OperationID:  operation.ID.String(),
+func mapBookingToResult(booking sqlc.Booking) CreateBookingResult {
+	return CreateBookingResult{
+		OperationID:  booking.OperationID.String(),
 		BookingID:    booking.ID.String(),
 		Status:       "COMPLETED",
 		CustomerName: booking.CustomerName,
+		PhoneNumber:  booking.PhoneNo,
 		BookingDate:  fromPGDate(booking.BookingDate),
 		BookingTime:  fromPGTime(booking.BookingTime),
 		PartySize:    int(booking.PartySize),
@@ -201,4 +209,24 @@ func isIdempotencyKeyConflict(err error) bool {
 		return pgErr.ConstraintName == "" || strings.Contains(pgErr.ConstraintName, "idempotency_key")
 	}
 	return false
+}
+
+func (s *BookingService) ListBooking(ctx context.Context, phoneNumber string, bookingDate *time.Time) ([]CreateBookingResult, error) {
+	phone := strings.TrimSpace(phoneNumber)
+	if phone == "" {
+		return nil, apperror.ErrInvalidInput
+	}
+	var pgDate pgtype.Date
+	if bookingDate != nil {
+		pgDate = toPGDate(*bookingDate)
+	}
+	bookings, err := s.bookingsRepo.ListBooking(ctx, phone, pgDate)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]CreateBookingResult, len(bookings))
+	for i, b := range bookings {
+		results[i] = mapBookingToResult(b)
+	}
+	return results, nil
 }
