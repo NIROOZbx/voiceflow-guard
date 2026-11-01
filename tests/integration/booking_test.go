@@ -5,6 +5,8 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -54,6 +56,9 @@ func TestNormalBookingCreation(t *testing.T) {
 	if result.BookingTime != payload["booking_time"] {
 		t.Errorf("expected booking_time %v, got %v", payload["booking_time"], result.BookingTime)
 	}
+	if result.PhoneNumber != payload["phone_no"] {
+		t.Errorf("expected phone_no %v, got %v", payload["phone_no"], result.PhoneNumber)
+	}
 
 	// Database assertions
 	opCount, err := app.CountOperations(ctx, key)
@@ -77,6 +82,7 @@ func TestNormalBookingCreation(t *testing.T) {
 		BookingDate:  payload["booking_date"].(string),
 		BookingTime:  payload["booking_time"].(string),
 		PartySize:    payload["party_size"].(int),
+		PhoneNo:      payload["phone_no"].(string),
 	})
 	if err != nil {
 		t.Fatalf("compute expected hash: %v", err)
@@ -103,6 +109,9 @@ func TestNormalBookingCreation(t *testing.T) {
 	if int(booking.PartySize) != payload["party_size"] {
 		t.Errorf("expected booking party_size %v, got %v", payload["party_size"], booking.PartySize)
 	}
+	if booking.PhoneNo != payload["phone_no"] {
+		t.Errorf("expected booking phone_no %v, got %v", payload["phone_no"], booking.PhoneNo)
+	}
 
 	totalOps, err := app.TotalOperations(ctx)
 	if err != nil || totalOps != 1 {
@@ -111,5 +120,79 @@ func TestNormalBookingCreation(t *testing.T) {
 	totalBookings, err := app.TotalBookings(ctx)
 	if err != nil || totalBookings != 1 {
 		t.Errorf("expected total bookings in db to be 1, got %d (err: %v)", totalBookings, err)
+	}
+}
+
+func TestListBookings(t *testing.T) {
+	app := newTestApp(t)
+
+	// Create a booking first
+	key := newIdempotencyKey()
+	payload := validBookingPayload()
+	resp, body := app.PostBooking(t, key, payload)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create booking failed: %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	// 1. Query by phone number
+	phone := payload["phone_no"].(string)
+	reqURL := fmt.Sprintf("%s/bookings?phone_no=%s", app.Server.URL, phone)
+	getResp, err := app.Client.Get(reqURL)
+	if err != nil {
+		t.Fatalf("GET /bookings request failed: %v", err)
+	}
+	defer getResp.Body.Close()
+
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", getResp.StatusCode)
+	}
+
+	var bookings []service.CreateBookingResult
+	getBody, _ := io.ReadAll(getResp.Body)
+	if err := json.Unmarshal(getBody, &bookings); err != nil {
+		t.Fatalf("failed to decode GET response: %v", err)
+	}
+	if len(bookings) != 1 {
+		t.Fatalf("expected 1 booking for phone, got %d", len(bookings))
+	}
+	if bookings[0].PhoneNumber != phone {
+		t.Errorf("expected phone %s, got %s", phone, bookings[0].PhoneNumber)
+	}
+
+	// 2. Query by phone and date filter
+	date := payload["booking_date"].(string)
+	dateURL := fmt.Sprintf("%s/bookings?phone_no=%s&date=%s", app.Server.URL, phone, date)
+	dateResp, err := app.Client.Get(dateURL)
+	if err != nil {
+		t.Fatalf("GET /bookings with date failed: %v", err)
+	}
+	defer dateResp.Body.Close()
+
+	if dateResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", dateResp.StatusCode)
+	}
+	var dateBookings []service.CreateBookingResult
+	dateBody, _ := io.ReadAll(dateResp.Body)
+	if err := json.Unmarshal(dateBody, &dateBookings); err != nil {
+		t.Fatalf("failed to decode GET response: %v", err)
+	}
+	if len(dateBookings) != 1 {
+		t.Fatalf("expected 1 booking for phone and date, got %d", len(dateBookings))
+	}
+
+	// 3. Query with non-existent date should return empty array
+	emptyURL := fmt.Sprintf("%s/bookings?phone_no=%s&date=2099-01-01", app.Server.URL, phone)
+	emptyResp, err := app.Client.Get(emptyURL)
+	if err != nil {
+		t.Fatalf("GET /bookings empty failed: %v", err)
+	}
+	defer emptyResp.Body.Close()
+	var emptyBookings []service.CreateBookingResult
+	emptyBody, _ := io.ReadAll(emptyResp.Body)
+	if err := json.Unmarshal(emptyBody, &emptyBookings); err != nil {
+		t.Fatalf("failed to decode empty response: %v", err)
+	}
+	if len(emptyBookings) != 0 {
+		t.Errorf("expected 0 bookings for non-existent date, got %d", len(emptyBookings))
 	}
 }

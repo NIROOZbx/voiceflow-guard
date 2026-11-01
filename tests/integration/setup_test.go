@@ -293,6 +293,7 @@ func validBookingPayload() map[string]any {
 		"party_size":    4,
 		"booking_date":  "2026-11-20",
 		"booking_time":  "19:00:00",
+		"phone_no":      "+1234567890",
 	}
 }
 

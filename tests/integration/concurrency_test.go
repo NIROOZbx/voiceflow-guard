@@ -296,3 +296,92 @@ func TestConcurrentRequestsSameKeyWithConflictingPayloads(t *testing.T) {
 		t.Errorf("expected 1 booking in DB, got %d", totalBookings)
 	}
 }
+
+// TestConcurrentRequestsDifferentKeysSameSlot verifies that when concurrent requests race
+// for the exact same booking slot (phone, date, time) with different idempotency keys,
+// PostgreSQL advisory locking serializes them, duplicate detection catches the subsequent ones,
+// and exactly ONE booking is persisted in the database.
+func TestConcurrentRequestsDifferentKeysSameSlot(t *testing.T) {
+	app := newTestApp(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	payload := validBookingPayload()
+	bodyBytes, _ := json.Marshal(payload)
+
+	const numWorkers = 10
+	results := make([]httpResult, numWorkers)
+
+	var readyWg sync.WaitGroup
+	var doneWg sync.WaitGroup
+	startGate := make(chan struct{})
+
+	readyWg.Add(numWorkers)
+	doneWg.Add(numWorkers)
+
+	for i := 0; i < numWorkers; i++ {
+		workerID := i
+		// Each worker gets a UNIQUE idempotency key
+		workerKey := newIdempotencyKey()
+
+		go func() {
+			defer doneWg.Done()
+
+			req, _ := http.NewRequest(http.MethodPost, app.Server.URL+"/bookings", bytes.NewReader(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Idempotency-Key", workerKey)
+
+			readyWg.Done()
+			<-startGate
+
+			resp, err := app.Client.Do(req)
+			if err != nil {
+				results[workerID] = httpResult{Err: err}
+				return
+			}
+			defer resp.Body.Close()
+
+			respBody, err := io.ReadAll(resp.Body)
+			results[workerID] = httpResult{
+				StatusCode: resp.StatusCode,
+				Body:       respBody,
+				Err:        err,
+			}
+		}()
+	}
+
+	readyWg.Wait()
+	close(startGate)
+	doneWg.Wait()
+
+	var createdCount int
+	var duplicateConflictCount int
+
+	for i, r := range results {
+		if r.Err != nil {
+			t.Fatalf("worker %d error: %v", i, r.Err)
+		}
+		switch r.StatusCode {
+		case http.StatusCreated:
+			createdCount++
+		case http.StatusConflict:
+			duplicateConflictCount++
+		default:
+			t.Errorf("worker %d unexpected status: %d (body: %s)", i, r.StatusCode, string(r.Body))
+		}
+	}
+
+	// Exactly 1 worker must succeed, all other concurrent slot claimants are rejected with 409
+	if createdCount != 1 {
+		t.Errorf("expected exactly 1 created booking, got %d", createdCount)
+	}
+	if duplicateConflictCount != numWorkers-1 {
+		t.Errorf("expected %d duplicate conflict rejections, got %d", numWorkers-1, duplicateConflictCount)
+	}
+
+	// Database state: exactly 1 booking persisted
+	totalBookings, err := app.TotalBookings(ctx)
+	if err != nil || totalBookings != 1 {
+		t.Errorf("expected exactly 1 booking in DB, got %d", totalBookings)
+	}
+}

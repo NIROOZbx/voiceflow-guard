@@ -109,8 +109,8 @@ func TestSameKeyWithDifferentPayload(t *testing.T) {
 	}
 }
 
-// Scenario D: Different key with the same payload
-func TestDifferentKeyWithSamePayload(t *testing.T) {
+// Scenario D: Different key with confirmed duplicate payload
+func TestDifferentKeyWithConfirmedDuplicate(t *testing.T) {
 	app := newTestApp(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -129,8 +129,11 @@ func TestDifferentKeyWithSamePayload(t *testing.T) {
 		t.Fatalf("unmarshal response 1: %v", err)
 	}
 
-	// 2. Second Request with different key
-	resp2, body2 := app.PostBooking(t, key2, payload)
+	// 2. Second Request with different key and confirmed duplicate flag
+	payload2 := validBookingPayload()
+	payload2["confirm_potential_duplicate"] = true
+
+	resp2, body2 := app.PostBooking(t, key2, payload2)
 	if resp2.StatusCode != http.StatusCreated {
 		t.Fatalf("request 2 expected %d, got %d. Body: %s", http.StatusCreated, resp2.StatusCode, string(body2))
 	}
@@ -155,6 +158,63 @@ func TestDifferentKeyWithSamePayload(t *testing.T) {
 	bookingCount, err := app.TotalBookings(ctx)
 	if err != nil || bookingCount != 2 {
 		t.Errorf("expected 2 bookings in DB, got %d (err: %v)", bookingCount, err)
+	}
+}
+
+// Scenario D.2: Unconfirmed duplicate booking is rejected with 409 Conflict
+func TestDuplicateBookingDetectionAndConfirmation(t *testing.T) {
+	app := newTestApp(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	key1 := newIdempotencyKey()
+	payload := validBookingPayload()
+
+	// 1. First booking succeeds
+	resp1, body1 := app.PostBooking(t, key1, payload)
+	if resp1.StatusCode != http.StatusCreated {
+		t.Fatalf("first booking failed: %d. Body: %s", resp1.StatusCode, string(body1))
+	}
+
+	// 2. Second booking with new key for same slot without confirmation is rejected
+	key2 := newIdempotencyKey()
+	resp2, body2 := app.PostBooking(t, key2, payload)
+	if resp2.StatusCode != http.StatusConflict {
+		t.Fatalf("expected status 409 Conflict for duplicate booking, got %d. Body: %s", resp2.StatusCode, string(body2))
+	}
+
+	var conflictResp struct {
+		Error              string `json:"error"`
+		PotentialDuplicate struct {
+			BookingDate string `json:"booking_date"`
+			BookingTime string `json:"booking_time"`
+			PartySize   int    `json:"party_size"`
+		} `json:"potential_duplicate"`
+	}
+	if err := json.Unmarshal(body2, &conflictResp); err != nil {
+		t.Fatalf("failed to decode duplicate 409 response: %v", err)
+	}
+	if !strings.Contains(conflictResp.Error, "potential duplicate booking detected") {
+		t.Errorf("unexpected error message: %q", conflictResp.Error)
+	}
+	if conflictResp.PotentialDuplicate.PartySize != payload["party_size"].(int) {
+		t.Errorf("expected duplicate party_size %v, got %v", payload["party_size"], conflictResp.PotentialDuplicate.PartySize)
+	}
+
+	// 3. Third booking with confirmed duplicate flag succeeds
+	key3 := newIdempotencyKey()
+	confirmedPayload := validBookingPayload()
+	confirmedPayload["confirm_potential_duplicate"] = true
+
+	resp3, body3 := app.PostBooking(t, key3, confirmedPayload)
+	if resp3.StatusCode != http.StatusCreated {
+		t.Fatalf("confirmed duplicate expected 201 Created, got %d. Body: %s", resp3.StatusCode, string(body3))
+	}
+
+	// Database should contain 2 operations and 2 bookings (the rejected duplicate does not persist)
+	totalBookings, err := app.TotalBookings(ctx)
+	if err != nil || totalBookings != 2 {
+		t.Errorf("expected 2 bookings in DB, got %d (err: %v)", totalBookings, err)
 	}
 }
 
