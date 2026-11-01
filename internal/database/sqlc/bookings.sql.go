@@ -83,6 +83,38 @@ func (q *Queries) GetBookingByOperationID(ctx context.Context, operationID pgtyp
 	return i, err
 }
 
+const getPotentialDuplicateBooking = `-- name: GetPotentialDuplicateBooking :one
+SELECT id, operation_id, customer_name, booking_date, booking_time, party_size, created_at, phone_no
+FROM bookings
+WHERE phone_no = $1
+  AND booking_date = $2
+  AND booking_time = $3
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetPotentialDuplicateBookingParams struct {
+	PhoneNo     string
+	BookingDate pgtype.Date
+	BookingTime pgtype.Time
+}
+
+func (q *Queries) GetPotentialDuplicateBooking(ctx context.Context, arg GetPotentialDuplicateBookingParams) (Booking, error) {
+	row := q.db.QueryRow(ctx, getPotentialDuplicateBooking, arg.PhoneNo, arg.BookingDate, arg.BookingTime)
+	var i Booking
+	err := row.Scan(
+		&i.ID,
+		&i.OperationID,
+		&i.CustomerName,
+		&i.BookingDate,
+		&i.BookingTime,
+		&i.PartySize,
+		&i.CreatedAt,
+		&i.PhoneNo,
+	)
+	return i, err
+}
+
 const listBookingsByPhone = `-- name: ListBookingsByPhone :many
 SELECT id, operation_id, customer_name, booking_date, booking_time, party_size, created_at, phone_no
 FROM bookings
@@ -159,4 +191,13 @@ func (q *Queries) ListBookingsByPhoneAndDate(ctx context.Context, arg ListBookin
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockBookingSlot = `-- name: LockBookingSlot :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1, 0))
+`
+
+func (q *Queries) LockBookingSlot(ctx context.Context, hashtextextended string) error {
+	_, err := q.db.Exec(ctx, lockBookingSlot, hashtextextended)
+	return err
 }

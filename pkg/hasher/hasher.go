@@ -7,10 +7,10 @@ import (
 	"github.com/google/uuid"
 )
 
-
 func NewIdempotencyKey() string {
 	return uuid.NewString()
 }
+
 // String returns the hex-encoded SHA-256 hash of a string.
 func String(s string) string {
 	sum := sha256.Sum256([]byte(s))

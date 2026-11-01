@@ -30,10 +30,10 @@ func main() {
 	queries := sqlc.New(db)
 
 	operationRepo := repository.NewOpsRepo(queries)
-	bookingRepo:=repository.NewBookingsRepo(queries)
+	bookingRepo := repository.NewBookingsRepo(queries)
 
 	txManager := repository.NewTransactionManager(db)
-	opsService := service.NewOpsService(operationRepo,txManager,bookingRepo)
+	opsService := service.NewOpsService(operationRepo, txManager, bookingRepo)
 	bookingHandler := server.NewBookingHandler(opsService)
 
 	router := server.NewRouter(bookingHandler)

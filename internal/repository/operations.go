@@ -23,7 +23,7 @@ func NewOpsRepo(db *sqlc.Queries) *OperationsRepo {
 	}
 }
 
-func (o *OperationsRepo) CreateOperation(ctx context.Context, key ,requestHash string) (sqlc.Operation, error) {
+func (o *OperationsRepo) CreateOperation(ctx context.Context, key, requestHash string) (sqlc.Operation, error) {
 	operation, err := o.db.CreateOperation(ctx, sqlc.CreateOperationParams{
 		IdempotencyKey: key,
 		RequestHash: pgtype.Text{
@@ -47,8 +47,8 @@ func (o *OperationsRepo) GetOperationByIdempotencyKey(ctx context.Context, key s
 	return operation, nil
 }
 
-func (o *OperationsRepo) UpdateOperationStatus(ctx context.Context,id pgtype.UUID,status string,result []byte,) (sqlc.Operation, error) {
-	
+func (o *OperationsRepo) UpdateOperationStatus(ctx context.Context, id pgtype.UUID, status string, result []byte) (sqlc.Operation, error) {
+
 	operation, err := o.db.UpdateOperationStatus(ctx, sqlc.UpdateOperationStatusParams{
 		ID:     id,
 		Status: status,
@@ -60,4 +60,3 @@ func (o *OperationsRepo) UpdateOperationStatus(ctx context.Context,id pgtype.UUI
 
 	return operation, nil
 }
-

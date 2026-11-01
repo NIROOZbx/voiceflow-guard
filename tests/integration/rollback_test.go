@@ -25,38 +25,25 @@ type failingTxManager struct {
 func (m *failingTxManager) WithinTransaction(ctx context.Context, fn func(*repository.Repositories) error) error {
 	return m.base.WithinTransaction(ctx, func(r *repository.Repositories) error {
 		if m.failOnBookingCreation {
-			r.Bookings = &mockFailingBookingsRepo{base: r.Bookings}
+			r.Bookings = &mockFailingBookingsRepo{BookingsRepository: r.Bookings}
 		}
 		if m.failOnStatusUpdate {
-			r.Operations = &mockFailingOperationsRepo{base: r.Operations}
+			r.Operations = &mockFailingOperationsRepo{OperationsRepository: r.Operations}
 		}
 		return fn(r)
 	})
 }
 
 type mockFailingBookingsRepo struct {
-	base repository.BookingsRepository
+	repository.BookingsRepository
 }
 
 func (m *mockFailingBookingsRepo) CreateBooking(ctx context.Context, params repository.CreateBookingParams) (sqlc.Booking, error) {
 	return sqlc.Booking{}, errors.New("simulated booking creation database failure")
 }
 
-func (m *mockFailingBookingsRepo) GetBookingByOperationID(ctx context.Context, opID pgtype.UUID) (sqlc.Booking, error) {
-	return m.base.GetBookingByOperationID(ctx, opID)
-}
-
 type mockFailingOperationsRepo struct {
-	base repository.OperationsRepository
-}
-
-func (m *mockFailingOperationsRepo) CreateOperation(ctx context.Context, key string, requestHash string) (sqlc.Operation, error) {
-	// Let CreateOperation execute against real PostgreSQL
-	return m.base.CreateOperation(ctx, key, requestHash)
-}
-
-func (m *mockFailingOperationsRepo) GetOperationByIdempotencyKey(ctx context.Context, key string) (sqlc.Operation, error) {
-	return m.base.GetOperationByIdempotencyKey(ctx, key)
+	repository.OperationsRepository
 }
 
 func (m *mockFailingOperationsRepo) UpdateOperationStatus(ctx context.Context, id pgtype.UUID, status string, result []byte) (sqlc.Operation, error) {

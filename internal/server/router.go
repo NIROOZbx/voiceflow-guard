@@ -16,6 +16,3 @@ func NewRouter(bookingHandler *BookingHandler) *gin.Engine {
 
 	return router
 }
-
-
-

@@ -17,26 +17,44 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const (
+	StatusPending   = "PENDING"
+	StatusCompleted = "COMPLETED"
+	StatusFailed    = "FAILED"
+)
+
+// IsValidStatus validates if the provided status is one of the allowed operation statuses.
+func IsValidStatus(status string) bool {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case StatusPending, StatusCompleted, StatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
 type BookingService struct {
 	operationsRepo repository.OperationsRepository
 	TxManager      repository.TransactionManager
 	bookingsRepo   repository.BookingsRepository
 }
 type CreateBookingInput struct {
-	IdempotencyKey string
-	CustomerName   string
-	PartySize      int
-	BookingDate    time.Time
-	BookingTime    time.Time
-	PhoneNumber    string
+	IdempotencyKey            string
+	CustomerName              string
+	PartySize                 int
+	BookingDate               time.Time
+	BookingTime               time.Time
+	PhoneNumber               string
+	ConfirmPotentialDuplicate bool
 }
 
 type BookingHashPayload struct {
-	CustomerName string `json:"customer_name"`
-	BookingDate  string `json:"booking_date"`
-	BookingTime  string `json:"booking_time"`
-	PartySize    int    `json:"party_size"`
-	PhoneNo      string `json:"phone_no"`
+	CustomerName              string `json:"customer_name"`
+	BookingDate               string `json:"booking_date"`
+	BookingTime               string `json:"booking_time"`
+	PartySize                 int    `json:"party_size"`
+	PhoneNo                   string `json:"phone_no"`
+	ConfirmPotentialDuplicate bool   `json:"confirm_potential_duplicate"`
 }
 
 type CreateBookingResult struct {
@@ -70,11 +88,12 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 	}
 
 	payload := BookingHashPayload{
-		CustomerName: customerName,
-		BookingDate:  input.BookingDate.Format("2006-01-02"),
-		BookingTime:  input.BookingTime.Format("15:04:05"),
-		PartySize:    input.PartySize,
-		PhoneNo:      input.PhoneNumber,
+		CustomerName:              customerName,
+		BookingDate:               input.BookingDate.Format("2006-01-02"),
+		BookingTime:               input.BookingTime.Format("15:04:05"),
+		PartySize:                 input.PartySize,
+		PhoneNo:                   input.PhoneNumber,
+		ConfirmPotentialDuplicate: input.ConfirmPotentialDuplicate,
 	}
 
 	requestHash, err := hasher.JSON(payload)
@@ -103,6 +122,21 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 			return fmt.Errorf("create operation: %w", err)
 		}
 
+		slotKey := fmt.Sprintf(
+			"%s|%s|%s",
+			input.PhoneNumber,
+			input.BookingDate.Format("2006-01-02"),
+			input.BookingTime.Format("15:04:05"),
+		)
+
+		if err := r.Bookings.LockBookingSlot(ctx, slotKey); err != nil {
+			return fmt.Errorf("lock booking slot: %w", err)
+		}
+
+		if err := DuplicateCheck(ctx, input, r.Bookings); err != nil {
+			return err
+		}
+
 		// Create booking
 
 		booking, err := r.Bookings.CreateBooking(ctx, repository.CreateBookingParams{
@@ -120,7 +154,12 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 
 		// Build result
 		result = mapBookingToResult(booking)
-	
+
+		// Validate status check
+		if !IsValidStatus(result.Status) {
+			return fmt.Errorf("invalid operation status: %s", result.Status)
+		}
+
 		// Serialize result
 		bytes, err := json.Marshal(result)
 
@@ -137,6 +176,11 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 	})
 
 	if err != nil {
+		var duplicateErr *apperror.PotentialDuplicateBookingError
+
+		if errors.As(err, &duplicateErr) {
+			return nil, duplicateErr
+		}
 		if isIdempotencyKeyConflict(err) {
 			// Use the normal repository, NOT the failed transaction.
 			existing, lookupErr := s.operationsRepo.GetOperationByIdempotencyKey(
@@ -144,7 +188,7 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 				key,
 			)
 			if lookupErr != nil {
-				return nil, lookupErr
+				return nil, apperror.ErrOperationFailed
 			}
 
 			// Check whether this is actually the same request.
@@ -165,14 +209,19 @@ func (s *BookingService) CreateBooking(ctx context.Context, input CreateBookingI
 }
 
 func (s *BookingService) handleExistingOperation(existingOperation sqlc.Operation) (*CreateBookingResult, error) {
-	switch strings.ToUpper(existingOperation.Status) {
-	case "COMPLETED":
+	status := strings.ToUpper(strings.TrimSpace(existingOperation.Status))
+	if !IsValidStatus(status) {
+		return nil, apperror.ErrOperationFailed
+	}
+
+	switch status {
+	case StatusCompleted:
 		return decodeOperationResult(existingOperation)
 
-	case "PENDING":
+	case StatusPending:
 		return nil, apperror.ErrOperationInProgress
 
-	case "FAILED":
+	case StatusFailed:
 		return nil, apperror.ErrOperationFailed
 
 	default:
@@ -180,11 +229,32 @@ func (s *BookingService) handleExistingOperation(existingOperation sqlc.Operatio
 	}
 }
 
+func (s *BookingService) ListBooking(ctx context.Context, phoneNumber string, bookingDate *time.Time) ([]CreateBookingResult, error) {
+	phone := strings.TrimSpace(phoneNumber)
+	if phone == "" {
+		return nil, apperror.ErrInvalidInput
+	}
+	var pgDate pgtype.Date
+	if bookingDate != nil {
+		pgDate = toPGDate(*bookingDate)
+	}
+	bookings, err := s.bookingsRepo.ListBooking(ctx, phone, pgDate)
+	if err != nil {
+		return nil, apperror.ErrOperationFailed
+	}
+	results := make([]CreateBookingResult, len(bookings))
+	for i, b := range bookings {
+		results[i] = mapBookingToResult(b)
+	}
+	return results, nil
+}
+
+// Helpers
 func mapBookingToResult(booking sqlc.Booking) CreateBookingResult {
 	return CreateBookingResult{
 		OperationID:  booking.OperationID.String(),
 		BookingID:    booking.ID.String(),
-		Status:       "COMPLETED",
+		Status:       StatusCompleted,
 		CustomerName: booking.CustomerName,
 		PhoneNumber:  booking.PhoneNo,
 		BookingDate:  fromPGDate(booking.BookingDate),
@@ -211,22 +281,33 @@ func isIdempotencyKeyConflict(err error) bool {
 	return false
 }
 
-func (s *BookingService) ListBooking(ctx context.Context, phoneNumber string, bookingDate *time.Time) ([]CreateBookingResult, error) {
-	phone := strings.TrimSpace(phoneNumber)
-	if phone == "" {
-		return nil, apperror.ErrInvalidInput
+func DuplicateCheck(ctx context.Context, input CreateBookingInput, r repository.BookingsRepository) error {
+
+	if input.ConfirmPotentialDuplicate {
+		return nil
 	}
-	var pgDate pgtype.Date
-	if bookingDate != nil {
-		pgDate = toPGDate(*bookingDate)
+
+	existingBooking, err := r.GetPotentialDuplicate(
+		ctx,
+		repository.DuplicateParams{
+			PhoneNo:     input.PhoneNumber,
+			BookingDate: toPGDate(input.BookingDate),
+			BookingTime: toPGTime(input.BookingTime),
+		},
+	)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
 	}
-	bookings, err := s.bookingsRepo.ListBooking(ctx, phone, pgDate)
+
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("check potential duplicate: %w", err)
 	}
-	results := make([]CreateBookingResult, len(bookings))
-	for i, b := range bookings {
-		results[i] = mapBookingToResult(b)
+
+	return &apperror.PotentialDuplicateBookingError{
+		BookingDate: fromPGDate(existingBooking.BookingDate),
+		BookingTime: fromPGTime(existingBooking.BookingTime),
+		PartySize:   int(existingBooking.PartySize),
 	}
-	return results, nil
+
 }

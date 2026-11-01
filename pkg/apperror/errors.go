@@ -16,6 +16,7 @@ var (
 
 // HTTPStatus maps known domain errors to their appropriate HTTP status codes.
 func HTTPStatus(err error) int {
+	var dupErr *PotentialDuplicateBookingError
 	switch {
 	case errors.Is(err, ErrMissingIdempotencyKey):
 		return http.StatusBadRequest // 400
@@ -27,9 +28,21 @@ func HTTPStatus(err error) int {
 		return http.StatusConflict // 409
 	case errors.Is(err, ErrOperationInProgress):
 		return http.StatusConflict // 409
+	case errors.As(err, &dupErr):
+		return http.StatusConflict // 409
 	case errors.Is(err, ErrOperationFailed):
 		return http.StatusInternalServerError // 500
 	default:
 		return http.StatusInternalServerError // 500
 	}
+}
+
+type PotentialDuplicateBookingError struct {
+	BookingDate string
+	BookingTime string
+	PartySize   int
+}
+
+func (e *PotentialDuplicateBookingError) Error() string {
+	return "potential duplicate booking detected"
 }

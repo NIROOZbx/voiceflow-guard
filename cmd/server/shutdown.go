@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func runHTTPServer(httpServer *http.Server,db *pgxpool.Pool) error {
+func runHTTPServer(httpServer *http.Server, db *pgxpool.Pool) error {
 	serverErrors := make(chan error, 1)
 	go func() {
 		log.Printf("HTTP server listening on %s", httpServer.Addr)

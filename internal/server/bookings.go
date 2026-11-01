@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -27,11 +28,12 @@ func NewBookingHandler(bookingService BookingService) *BookingHandler {
 }
 
 type CreateBookingRequest struct {
-	CustomerName string `json:"customer_name" binding:"required"`
-	PartySize    int    `json:"party_size" binding:"required,gt=0"`
-	BookingDate  string `json:"booking_date" binding:"required"`
-	BookingTime  string `json:"booking_time" binding:"required"`
-	PhoneNumber string `json:"phone_no" binding:"required"`
+	CustomerName              string `json:"customer_name" binding:"required"`
+	PartySize                 int    `json:"party_size" binding:"required,gt=0"`
+	BookingDate               string `json:"booking_date" binding:"required"`
+	BookingTime               string `json:"booking_time" binding:"required"`
+	PhoneNumber               string `json:"phone_no" binding:"required"`
+	ConfirmPotentialDuplicate bool   `json:"confirm_potential_duplicate"`
 }
 
 func (h *BookingHandler) CreateBooking(c *gin.Context) {
@@ -72,15 +74,28 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 
 	// 4. Delegate to Service
 	result, err := h.bookingService.CreateBooking(c.Request.Context(), service.CreateBookingInput{
-		IdempotencyKey: idempotencyKey,
-		CustomerName:   req.CustomerName,
-		PartySize:      req.PartySize,
-		BookingDate:    bookingDate,
-		BookingTime:    bookingTime,
-		PhoneNumber: req.PhoneNumber,
-
+		IdempotencyKey:            idempotencyKey,
+		CustomerName:              req.CustomerName,
+		PartySize:                 req.PartySize,
+		BookingDate:               bookingDate,
+		BookingTime:               bookingTime,
+		PhoneNumber:               req.PhoneNumber,
+		ConfirmPotentialDuplicate: req.ConfirmPotentialDuplicate,
 	})
 	if err != nil {
+		var dupErr *apperror.PotentialDuplicateBookingError
+		if errors.As(err, &dupErr) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": dupErr.Error(),
+				"potential_duplicate": gin.H{
+					"booking_date": dupErr.BookingDate,
+					"booking_time": dupErr.BookingTime,
+					"party_size":   dupErr.PartySize,
+				},
+			})
+			return
+		}
+
 		status := apperror.HTTPStatus(err)
 		if status == http.StatusInternalServerError {
 			c.JSON(status, gin.H{"error": "operation failed"})

@@ -19,11 +19,18 @@ type CreateBookingParams struct {
 	BookingTime  pgtype.Time
 	PartySize    int32
 }
+type DuplicateParams struct {
+	PhoneNo     string
+	BookingDate pgtype.Date
+	BookingTime pgtype.Time
+}
 
 type BookingsRepository interface {
 	CreateBooking(ctx context.Context, params CreateBookingParams) (sqlc.Booking, error)
 	GetBookingByOperationID(ctx context.Context, operationID pgtype.UUID) (sqlc.Booking, error)
 	ListBooking(ctx context.Context, phoneNumber string, bookingDate pgtype.Date) ([]sqlc.Booking, error)
+	GetPotentialDuplicate(ctx context.Context, params DuplicateParams) (sqlc.Booking, error)
+	LockBookingSlot(ctx context.Context, slotKey string) error
 }
 
 func NewBookingsRepo(db *sqlc.Queries) *BookingsRepo {
@@ -32,7 +39,7 @@ func NewBookingsRepo(db *sqlc.Queries) *BookingsRepo {
 	}
 }
 
-func (b *BookingsRepo) CreateBooking(ctx context.Context,params CreateBookingParams,) (sqlc.Booking, error) {
+func (b *BookingsRepo) CreateBooking(ctx context.Context, params CreateBookingParams) (sqlc.Booking, error) {
 	booking, err := b.db.CreateBooking(ctx, sqlc.CreateBookingParams{
 		OperationID:  params.OperationID,
 		CustomerName: params.CustomerName,
@@ -48,7 +55,7 @@ func (b *BookingsRepo) CreateBooking(ctx context.Context,params CreateBookingPar
 	return booking, nil
 }
 
-func (b *BookingsRepo) GetBookingByOperationID(ctx context.Context,operationID pgtype.UUID) (sqlc.Booking, error) {
+func (b *BookingsRepo) GetBookingByOperationID(ctx context.Context, operationID pgtype.UUID) (sqlc.Booking, error) {
 	booking, err := b.db.GetBookingByOperationID(ctx, operationID)
 	if err != nil {
 		return sqlc.Booking{}, err
@@ -66,4 +73,16 @@ func (b *BookingsRepo) ListBooking(ctx context.Context, phoneNumber string, book
 	}
 
 	return b.db.ListBookingsByPhone(ctx, phoneNumber)
+}
+
+func (b *BookingsRepo) GetPotentialDuplicate(ctx context.Context, params DuplicateParams) (sqlc.Booking, error) {
+	return b.db.GetPotentialDuplicateBooking(ctx, sqlc.GetPotentialDuplicateBookingParams{
+		PhoneNo:     params.PhoneNo,
+		BookingDate: params.BookingDate,
+		BookingTime: params.BookingTime,
+	})
+}
+
+func (b *BookingsRepo) LockBookingSlot(ctx context.Context, slotKey string) error {
+	return b.db.LockBookingSlot(ctx, slotKey)
 }

@@ -34,3 +34,15 @@ FROM bookings
 WHERE phone_no = $1
   AND booking_date = $2
 ORDER BY booking_time ASC;
+
+-- name: GetPotentialDuplicateBooking :one
+SELECT *
+FROM bookings
+WHERE phone_no = $1
+  AND booking_date = $2
+  AND booking_time = $3
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: LockBookingSlot :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1, 0));

@@ -17,7 +17,7 @@ type Repositories struct {
 }
 
 type TransactionManager interface {
-	WithinTransaction(ctx context.Context, fn func(*Repositories) error)error
+	WithinTransaction(ctx context.Context, fn func(*Repositories) error) error
 }
 
 func NewTransactionManager(db *pgxpool.Pool) *Transaction {
@@ -38,11 +38,11 @@ func (t *Transaction) WithinTransaction(ctx context.Context, fn func(*Repositori
 		Operations: NewOpsRepo(queries),
 		Bookings:   NewBookingsRepo(queries),
 	}
-	
-	if err := fn(repos); err != nil {
-    return err
-}
 
-return tx.Commit(ctx)
+	if err := fn(repos); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 
 }
