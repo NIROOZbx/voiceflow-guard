@@ -89,8 +89,11 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		var dupErr *apperror.PotentialDuplicateBookingError
 		if errors.As(err, &dupErr) {
 			c.JSON(http.StatusConflict, gin.H{
-				"error": dupErr.Error(),
-				"potential_duplicate": gin.H{
+				"success":               false,
+				"code":                  "POTENTIAL_DUPLICATE",
+				"message":               dupErr.Error(),
+				"requires_confirmation": true,
+				"existing_booking": gin.H{
 					"booking_date": dupErr.BookingDate,
 					"booking_time": dupErr.BookingTime,
 					"party_size":   dupErr.PartySize,
