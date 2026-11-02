@@ -80,6 +80,7 @@ func TestConcurrentRequestsSameKey(t *testing.T) {
 			}
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Idempotency-Key", key)
+			req.Header.Set("X-Backend-Secret", testBackendSecret)
 
 			// Signal ready
 			readyWg.Done()
@@ -253,6 +254,7 @@ func TestConcurrentRequestsSameKeyWithConflictingPayloads(t *testing.T) {
 			req, _ := http.NewRequest(http.MethodPost, app.Server.URL+"/bookings", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Idempotency-Key", key)
+			req.Header.Set("X-Backend-Secret", testBackendSecret)
 
 			readyWg.Done()
 			<-startGate
@@ -330,6 +332,7 @@ func TestConcurrentRequestsDifferentKeysSameSlot(t *testing.T) {
 			req, _ := http.NewRequest(http.MethodPost, app.Server.URL+"/bookings", bytes.NewReader(bodyBytes))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Idempotency-Key", workerKey)
+			req.Header.Set("X-Backend-Secret", testBackendSecret)
 
 			readyWg.Done()
 			<-startGate

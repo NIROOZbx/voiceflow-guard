@@ -69,6 +69,7 @@ Creates a new booking guarded by an idempotency key passed via the `Idempotency-
 | Header | Description | Required |
 | :--- | :--- | :--- |
 | `Idempotency-Key` | Unique key identifying this operation (max 255 chars) | **Yes** |
+| `X-Backend-Secret` | Shared secret to authenticate requests (or `Authorization: Bearer <secret>`) | **Yes** |
 | `Content-Type` | `application/json` | **Yes** |
 
 #### Request Body
@@ -165,9 +166,15 @@ List bookings filtered by phone number and an optional booking date.
 | `phone_no` | string | **Yes** | Phone number to query bookings for. |
 | `date` | string | No | Optional booking date in `YYYY-MM-DD` format. |
 
+#### Headers
+| Header | Description | Required |
+| :--- | :--- | :--- |
+| `X-Backend-Secret` | Shared secret to authenticate requests (or `Authorization: Bearer <secret>`) | **Yes** |
+
 #### Example
 ```sh
-curl "http://localhost:8080/bookings?phone_no=+1234567890&date=2026-11-20"
+curl "http://localhost:8080/bookings?phone_no=+1234567890&date=2026-11-20" \
+  -H "X-Backend-Secret: your_backend_secret_here"
 ```
 
 **Response (`200 OK`)**:
@@ -209,6 +216,7 @@ cp .env.example .env
 Configure your environment variables:
 - `HOST`: Server host (default `0.0.0.0`)
 - `PORT`: Server port (default `8080`)
+- `BACKEND_SECRET`: Shared secret for authenticating webhook/API requests
 - `DATABASE_URL`: PostgreSQL connection string (e.g. `postgres://postgres:postgres@localhost:5432/voiceflow_guard?sslmode=disable`)
 
 ### Database Migrations

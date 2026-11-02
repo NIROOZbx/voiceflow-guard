@@ -34,11 +34,15 @@ var (
 	dbInitOnce   sync.Once
 )
 
-const defaultTestDBURL = "postgres://postgres:postgres@localhost:5434/voiceflow_guard_test?sslmode=disable"
+const (
+	defaultTestDBURL  = "postgres://postgres:postgres@localhost:5434/voiceflow_guard_test?sslmode=disable"
+	testBackendSecret = "test-backend-secret-value"
+)
 
 // TestMain manages the global database pool and migrations for integration tests.
 func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
+	os.Setenv("BACKEND_SECRET", testBackendSecret)
 
 	dbURL := getTestDBURL()
 	if err := validateTestDBURL(dbURL); err != nil {
@@ -240,6 +244,7 @@ func (app *TestApp) PostBooking(t *testing.T, idempotencyKey string, payload any
 		t.Fatalf("create HTTP request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Backend-Secret", testBackendSecret)
 	if idempotencyKey != "" {
 		req.Header.Set("Idempotency-Key", idempotencyKey)
 	}

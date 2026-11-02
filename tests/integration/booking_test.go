@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -134,10 +135,20 @@ func TestListBookings(t *testing.T) {
 		t.Fatalf("create booking failed: %d, body: %s", resp.StatusCode, string(body))
 	}
 
+	// Helper to send authenticated GET request
+	getWithAuth := func(url string) (*http.Response, error) {
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("X-Backend-Secret", testBackendSecret)
+		return app.Client.Do(req)
+	}
+
 	// 1. Query by phone number
 	phone := payload["phone_no"].(string)
 	reqURL := fmt.Sprintf("%s/bookings?phone_no=%s", app.Server.URL, phone)
-	getResp, err := app.Client.Get(reqURL)
+	getResp, err := getWithAuth(reqURL)
 	if err != nil {
 		t.Fatalf("GET /bookings request failed: %v", err)
 	}
@@ -162,7 +173,7 @@ func TestListBookings(t *testing.T) {
 	// 2. Query by phone and date filter
 	date := payload["booking_date"].(string)
 	dateURL := fmt.Sprintf("%s/bookings?phone_no=%s&date=%s", app.Server.URL, phone, date)
-	dateResp, err := app.Client.Get(dateURL)
+	dateResp, err := getWithAuth(dateURL)
 	if err != nil {
 		t.Fatalf("GET /bookings with date failed: %v", err)
 	}
@@ -182,7 +193,7 @@ func TestListBookings(t *testing.T) {
 
 	// 3. Query with non-existent date should return empty array
 	emptyURL := fmt.Sprintf("%s/bookings?phone_no=%s&date=2099-01-01", app.Server.URL, phone)
-	emptyResp, err := app.Client.Get(emptyURL)
+	emptyResp, err := getWithAuth(emptyURL)
 	if err != nil {
 		t.Fatalf("GET /bookings empty failed: %v", err)
 	}
@@ -194,5 +205,50 @@ func TestListBookings(t *testing.T) {
 	}
 	if len(emptyBookings) != 0 {
 		t.Errorf("expected 0 bookings for non-existent date, got %d", len(emptyBookings))
+	}
+}
+
+func TestBackendSecretAuth(t *testing.T) {
+	app := newTestApp(t)
+
+	key := newIdempotencyKey()
+	payload := validBookingPayload()
+	bodyBytes, _ := json.Marshal(payload)
+
+	// 1. Missing secret header -> 401 Unauthorized
+	req, _ := http.NewRequest(http.MethodPost, app.Server.URL+"/bookings", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", key)
+	resp, err := app.Client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for missing secret, got %d", resp.StatusCode)
+	}
+
+	// 2. Wrong secret header -> 401 Unauthorized
+	reqWrong, _ := http.NewRequest(http.MethodPost, app.Server.URL+"/bookings", bytes.NewReader(bodyBytes))
+	reqWrong.Header.Set("Content-Type", "application/json")
+	reqWrong.Header.Set("Idempotency-Key", key)
+	reqWrong.Header.Set("X-Backend-Secret", "wrong-secret-value")
+	respWrong, err := app.Client.Do(reqWrong)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer respWrong.Body.Close()
+	if respWrong.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for wrong secret, got %d", respWrong.StatusCode)
+	}
+
+	// 3. Health check is public -> 200 OK without secret
+	respHealth, err := app.Client.Get(app.Server.URL + "/health")
+	if err != nil {
+		t.Fatalf("health check failed: %v", err)
+	}
+	defer respHealth.Body.Close()
+	if respHealth.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK for /health, got %d", respHealth.StatusCode)
 	}
 }
