@@ -29,45 +29,58 @@ func NewRouter(bookingHandler *BookingHandler) *gin.Engine {
 
 	return router
 }
-
 func BackendSecretAuth() gin.HandlerFunc {
 	expectedSecret := strings.TrimSpace(os.Getenv("BACKEND_SECRET"))
 
 	return func(c *gin.Context) {
-		clientSecret := c.GetHeader("X-API-KEY")
-		backendSecret := c.GetHeader("X-Backend-Secret")
 
-		log.Printf("[Router Auth] %s %s - Headers: X-API-KEY=%q, X-Backend-Secret=%q, Idempotency-Key=%q",
-			c.Request.Method, c.Request.URL.Path, clientSecret, backendSecret, c.GetHeader("Idempotency-Key"))
-
-		// Ensure the backend secret is configured.
+		// Ensure backend secret is configured.
 		if expectedSecret == "" {
-			log.Println("[Router Auth] ERROR: BACKEND_SECRET environment variable is not configured")
+			log.Println("[Router Auth] ERROR: BACKEND_SECRET is not configured")
+
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				"error": "Internal server error",
 			})
 			return
 		}
 
-		// Validate the key.
+		// Read the API key sent by Vaani.
+		clientSecret := strings.TrimSpace(c.GetHeader("X-API-KEY"))
+
+		// Log request details without exposing secrets.
+		log.Printf(
+			"[Router Auth] %s %s - X-API-KEY present: %t",
+			c.Request.Method,
+			c.Request.URL.Path,
+			clientSecret != "",
+		)
+
+		// Check whether the API key is present.
 		if clientSecret == "" {
-			log.Printf("[Router Auth] FAILED: X-API-KEY header is missing (received X-Backend-Secret=%q)", backendSecret)
+			log.Println("[Router Auth] FAILED: X-API-KEY header is missing")
+
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "Unauthorized",
 			})
 			return
 		}
 
-		if subtle.ConstantTimeCompare([]byte(clientSecret), []byte(expectedSecret)) != 1 {
-			log.Printf("[Router Auth] FAILED: X-API-KEY does not match expected secret")
+		// Compare provided key with backend secret.
+		if subtle.ConstantTimeCompare(
+			[]byte(clientSecret),
+			[]byte(expectedSecret),
+		) != 1 {
+
+			log.Println("[Router Auth] FAILED: API key does not match")
+
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "Unauthorized",
 			})
 			return
 		}
 
-		// Authentication successful.
 		log.Println("[Router Auth] SUCCESS: Request authenticated")
+
 		c.Next()
 	}
 }

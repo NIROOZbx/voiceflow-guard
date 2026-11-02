@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -29,13 +30,13 @@ func NewBookingHandler(bookingService BookingService) *BookingHandler {
 }
 
 type CreateBookingRequest struct {
-	CustomerName              string `json:"customer_name" binding:"required"`
-	PartySize                 int    `json:"party_size" binding:"required,gt=0"`
-	BookingDate               string `json:"booking_date" binding:"required"`
-	BookingTime               string `json:"booking_time" binding:"required"`
-	PhoneNumber               string `json:"phone_no" binding:"required"`
-	ConfirmPotentialDuplicate bool   `json:"confirm_potential_duplicate"`
-	IdempotencyKey            string `json:"idempotency_key"`
+	CustomerName              string  `json:"customer_name" binding:"required"`
+	PartySize                 float64 `json:"party_size" binding:"required,gt=0"`
+	BookingDate               string  `json:"booking_date" binding:"required"`
+	BookingTime               string  `json:"booking_time" binding:"required"`
+	PhoneNumber               string  `json:"phone_no" binding:"required"`
+	ConfirmPotentialDuplicate bool    `json:"confirm_potential_duplicate"`
+	IdempotencyKey            string  `json:"idempotency_key"`
 }
 
 func (h *BookingHandler) CreateBooking(c *gin.Context) {
@@ -61,6 +62,14 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		return
 	}
 
+	// 1. Validate: Is party_size a whole number?
+	if req.PartySize != math.Trunc(req.PartySize) || req.PartySize <= 0 {
+		log.Printf("[Handler CreateBooking] ERROR: party_size must be a positive whole number, got: %v", req.PartySize)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "party_size must be a positive whole number"})
+		return
+	}
+	partySize := int(req.PartySize)
+
 	// 2. Parse Date (format: YYYY-MM-DD)
 	bookingDate, err := time.Parse("2006-01-02", req.BookingDate)
 	if err != nil {
@@ -80,14 +89,14 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		}
 	}
 
-	log.Printf("[Handler CreateBooking] Processing booking for %q (phone: %s, date: %s, time: %s, key: %s)",
-		req.CustomerName, req.PhoneNumber, req.BookingDate, req.BookingTime, idempotencyKey)
+	log.Printf("[Handler CreateBooking] Processing booking for %q (party_size: %d, phone: %s, date: %s, time: %s, key: %s)",
+		req.CustomerName, partySize, req.PhoneNumber, req.BookingDate, req.BookingTime, idempotencyKey)
 
 	// 4. Delegate to Service
 	result, err := h.bookingService.CreateBooking(c.Request.Context(), service.CreateBookingInput{
 		IdempotencyKey:            idempotencyKey,
 		CustomerName:              req.CustomerName,
-		PartySize:                 req.PartySize,
+		PartySize:                 partySize,
 		BookingDate:               bookingDate,
 		BookingTime:               bookingTime,
 		PhoneNumber:               req.PhoneNumber,
