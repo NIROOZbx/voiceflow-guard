@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -41,6 +42,7 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 	var req CreateBookingRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("[Handler CreateBooking] ERROR: Failed to bind JSON: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -52,6 +54,7 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		idempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	}
 	if idempotencyKey == "" || len(idempotencyKey) > 255 {
+		log.Printf("[Handler CreateBooking] ERROR: Invalid or missing Idempotency-Key (len=%d)", len(idempotencyKey))
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Idempotency-Key is required and must not exceed 255 characters",
 		})
@@ -61,6 +64,7 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 	// 2. Parse Date (format: YYYY-MM-DD)
 	bookingDate, err := time.Parse("2006-01-02", req.BookingDate)
 	if err != nil {
+		log.Printf("[Handler CreateBooking] ERROR: Invalid booking_date format %q: %v", req.BookingDate, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid booking_date format, expected YYYY-MM-DD"})
 		return
 	}
@@ -70,10 +74,14 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 	if err != nil {
 		bookingTime, err = time.Parse("15:04", req.BookingTime)
 		if err != nil {
+			log.Printf("[Handler CreateBooking] ERROR: Invalid booking_time format %q: %v", req.BookingTime, err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid booking_time format, expected HH:MM or HH:MM:SS"})
 			return
 		}
 	}
+
+	log.Printf("[Handler CreateBooking] Processing booking for %q (phone: %s, date: %s, time: %s, key: %s)",
+		req.CustomerName, req.PhoneNumber, req.BookingDate, req.BookingTime, idempotencyKey)
 
 	// 4. Delegate to Service
 	result, err := h.bookingService.CreateBooking(c.Request.Context(), service.CreateBookingInput{
@@ -86,8 +94,10 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		ConfirmPotentialDuplicate: req.ConfirmPotentialDuplicate,
 	})
 	if err != nil {
+		log.Printf("[Handler CreateBooking] Service returned error: %v", err)
 		var dupErr *apperror.PotentialDuplicateBookingError
 		if errors.As(err, &dupErr) {
+			log.Printf("[Handler CreateBooking] Potential duplicate booking detected for %s", req.PhoneNumber)
 			c.JSON(http.StatusConflict, gin.H{
 				"success":               false,
 				"code":                  "POTENTIAL_DUPLICATE",
@@ -104,19 +114,24 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 
 		status := apperror.HTTPStatus(err)
 		if status == http.StatusInternalServerError {
+			log.Printf("[Handler CreateBooking] Internal server error (status %d): %v", status, err)
 			c.JSON(status, gin.H{"error": "operation failed"})
 			return
 		}
+		log.Printf("[Handler CreateBooking] Client error (status %d): %v", status, err)
 		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 
+	log.Printf("[Handler CreateBooking] SUCCESS: Booking created/resolved (booking_id: %s, op_id: %s, status: %s)",
+		result.BookingID, result.OperationID, result.Status)
 	c.JSON(http.StatusCreated, result)
 }
 
 func (h *BookingHandler) GetBooking(c *gin.Context) {
 	phoneNumber := strings.TrimSpace(c.Query("phone_no"))
 	if phoneNumber == "" {
+		log.Println("[Handler GetBooking] ERROR: Missing phone_no query param")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "phone_no query parameter is required"})
 		return
 	}
@@ -125,14 +140,18 @@ func (h *BookingHandler) GetBooking(c *gin.Context) {
 	if bookingDate := strings.TrimSpace(c.Query("date")); bookingDate != "" {
 		date, err := time.Parse("2006-01-02", bookingDate)
 		if err != nil {
+			log.Printf("[Handler GetBooking] ERROR: Invalid date query param %q: %v", bookingDate, err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid booking_date format, expected YYYY-MM-DD"})
 			return
 		}
 		parsedDate = &date
 	}
 
+	log.Printf("[Handler GetBooking] Listing bookings for phone: %s (date filter: %v)", phoneNumber, parsedDate)
+
 	bookings, err := h.bookingService.ListBooking(c.Request.Context(), phoneNumber, parsedDate)
 	if err != nil {
+		log.Printf("[Handler GetBooking] Service error: %v", err)
 		status := apperror.HTTPStatus(err)
 		if status == http.StatusInternalServerError {
 			c.JSON(status, gin.H{"error": "operation failed"})
@@ -142,5 +161,6 @@ func (h *BookingHandler) GetBooking(c *gin.Context) {
 		return
 	}
 
+	log.Printf("[Handler GetBooking] SUCCESS: Found %d bookings for phone %s", len(bookings), phoneNumber)
 	c.JSON(http.StatusOK, bookings)
 }
