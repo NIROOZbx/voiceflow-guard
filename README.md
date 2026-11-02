@@ -68,9 +68,11 @@ Creates a new booking guarded by an idempotency key passed via the `Idempotency-
 #### Headers
 | Header | Description | Required |
 | :--- | :--- | :--- |
-| `Idempotency-Key` | Unique key identifying this operation (max 255 chars) | **Yes** |
-| `X-Backend-Secret` | Shared secret to authenticate requests (or `Authorization: Bearer <secret>`) | **Yes** |
+| `X-API-KEY` | Shared secret to authenticate requests (configured via `BACKEND_SECRET`) | **Yes** |
+| `Idempotency-Key` | Unique key identifying this operation (max 255 chars; can alternatively be supplied in body) | Optional* |
 | `Content-Type` | `application/json` | **Yes** |
+
+*\* Required either in the `Idempotency-Key` header or the `idempotency_key` JSON body field.*
 
 #### Request Body
 ```json
@@ -80,7 +82,8 @@ Creates a new booking guarded by an idempotency key passed via the `Idempotency-
   "party_size": 4,
   "booking_date": "2026-11-20",
   "booking_time": "19:30:00",
-  "confirm_potential_duplicate": false
+  "confirm_potential_duplicate": false,
+  "idempotency_key": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
 }
 ```
 
@@ -88,10 +91,11 @@ Creates a new booking guarded by an idempotency key passed via the `Idempotency-
 | :--- | :--- | :--- | :--- |
 | `customer_name` | string | **Yes** | Name of the customer. |
 | `phone_no` | string | **Yes** | Contact phone number. |
-| `party_size` | integer | **Yes** | Number of guests (must be > 0). |
+| `party_size` | number | **Yes** | Number of guests (supports integer or whole float like `4` or `4.0`, must be > 0). |
 | `booking_date` | string | **Yes** | Date in `YYYY-MM-DD` format. |
 | `booking_time` | string | **Yes** | Time in `HH:MM:SS` or `HH:MM` format. |
 | `confirm_potential_duplicate` | boolean | No | Set to `true` to force booking if a duplicate slot is detected. |
+| `idempotency_key` | string | Optional* | Unique operation key if not passed via `Idempotency-Key` header. |
 
 #### Responses
 
@@ -113,8 +117,11 @@ Creates a new booking guarded by an idempotency key passed via the `Idempotency-
 Occurs when an existing booking already exists for the same phone number, date, and time:
 ```json
 {
-  "error": "potential duplicate booking detected",
-  "potential_duplicate": {
+  "success": false,
+  "code": "POTENTIAL_DUPLICATE",
+  "message": "potential duplicate booking detected for date 2026-11-20 at 19:30:00 with party size 4",
+  "requires_confirmation": true,
+  "existing_booking": {
     "booking_date": "2026-11-20",
     "booking_time": "19:30:00",
     "party_size": 4
@@ -124,7 +131,7 @@ Occurs when an existing booking already exists for the same phone number, date, 
 *To proceed with this duplicate booking, resend the request with `"confirm_potential_duplicate": true`.*
 
 **`409 Conflict` (Payload Mismatch)**:
-Occurs when the same `Idempotency-Key` is reused with different request data:
+Occurs when the same idempotency key is reused with different request data:
 ```json
 {
   "error": "idempotency key reused with different request"
@@ -141,7 +148,7 @@ Occurs when the same `Idempotency-Key` is reused with different request data:
 **`400 Bad Request` (Validation Error)**:
 ```json
 {
-  "error": "Idempotency-Key header is required and must not exceed 255 characters"
+  "error": "Idempotency-Key is required and must not exceed 255 characters"
 }
 ```
 
@@ -169,12 +176,12 @@ List bookings filtered by phone number and an optional booking date.
 #### Headers
 | Header | Description | Required |
 | :--- | :--- | :--- |
-| `X-Backend-Secret` | Shared secret to authenticate requests (or `Authorization: Bearer <secret>`) | **Yes** |
+| `X-API-KEY` | Shared secret to authenticate requests (configured via `BACKEND_SECRET`) | **Yes** |
 
 #### Example
 ```sh
 curl "http://localhost:8080/bookings?phone_no=+1234567890&date=2026-11-20" \
-  -H "X-Backend-Secret: your_backend_secret_here"
+  -H "X-API-KEY: your_backend_secret_here"
 ```
 
 **Response (`200 OK`)**:
