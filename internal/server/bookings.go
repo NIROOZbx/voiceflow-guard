@@ -34,6 +34,7 @@ type CreateBookingRequest struct {
 	BookingTime               string `json:"booking_time" binding:"required"`
 	PhoneNumber               string `json:"phone_no" binding:"required"`
 	ConfirmPotentialDuplicate bool   `json:"confirm_potential_duplicate"`
+	IdempotencyKey            string `json:"idempotency_key"`
 }
 
 func (h *BookingHandler) CreateBooking(c *gin.Context) {
@@ -43,14 +44,16 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
 	idempotencyKey := strings.TrimSpace(
 		c.GetHeader("Idempotency-Key"),
 	)
 
+	if idempotencyKey == "" {
+		idempotencyKey = strings.TrimSpace(req.IdempotencyKey)
+	}
 	if idempotencyKey == "" || len(idempotencyKey) > 255 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Idempotency-Key header is required and must not exceed 255 characters",
+			"error": "Idempotency-Key is required and must not exceed 255 characters",
 		})
 		return
 	}
